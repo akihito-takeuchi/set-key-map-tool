@@ -28,12 +28,13 @@ class EditKeyMapDialog : public QDialog {
   void addMapEntry_();
   void deleteChecked_();
   void loadCurrentScancodeMap_();
+  void updateKeyboardType_();
   void updateWindowState_();
 
  private:
   void createWidgets_();
   void initWidgetValues_();
-  void setKeyMapTable_(KeyboardType keyboard_type, const QList<KeyMapEntry>& key_map);
+  QList<KeyMapEntry> setKeyMapTable_(KeyboardType keyboard_type, const QList<KeyMapEntry>& key_map);
   void createConnections_();
 
   QStringList existing_names_;

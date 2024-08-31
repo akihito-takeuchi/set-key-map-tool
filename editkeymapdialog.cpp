@@ -1,16 +1,30 @@
 #include "editkeymapdialog.hpp"
 
-#include <QFormLayout>
+#include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QLabel>
 #include <QSignalBlocker>
 
 namespace {
 
 QComboBox* createKeySelect(KeyboardType keyboard_type) {
   auto key_select = new QComboBox;
-  key_select->addItems(getKeyNames(keyboard_type));
+  for (auto& key_name : getKeyNames(keyboard_type)) {
+    uint32_t scan_code = getScanCodeOf(keyboard_type, key_name);
+    key_select->addItem(key_name, scan_code);
+  }
   return key_select;
+}
+
+QLabel* createHeaderWidget(const QString& text) {
+  auto header = new QLabel(QString("<h3>%1</h3>").arg(text));
+  header->setAutoFillBackground(true);
+  auto pal = header->palette();
+  pal.setColor(QPalette::Base, QColor("navy"));
+  pal.setColor(QPalette::WindowText, QColor("silver"));
+  header->setPalette(pal);
+  return header;
 }
 
 QString encodeToString(uint16_t value) {
@@ -48,7 +62,7 @@ EditKeyMapDialog::EditKeyMapDialog(QWidget* parent,
   initWidgetValues_();
   createConnections_();
   updateWindowState_();
-  resize(600, 500);
+  resize(700, 600);
 }
 
 void EditKeyMapDialog::createWidgets_() {
@@ -75,18 +89,22 @@ void EditKeyMapDialog::createWidgets_() {
   pal.setColor(QPalette::Text, Qt::gray);
   scan_code_display_->setPalette(pal);
   buttons_ = new  QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-  auto layout = new QFormLayout;
+  auto layout = new QVBoxLayout;
   auto button_layout = new QHBoxLayout;
   button_layout->addStretch(1);
   button_layout->addWidget(add_entry_button_);
   button_layout->addWidget(delete_checked_button_);
   button_layout->addWidget(load_current_scan_code_map_button_);
-  layout->addRow("Setup name", name_input_);
-  layout->addRow("Keyboard type", keyboard_type_select_);
-  layout->addRow(button_layout);
-  layout->addRow("Key map table", key_map_table_);
-  layout->addRow("Scan code", scan_code_display_);
-  layout->addRow(buttons_);
+  layout->addWidget(createHeaderWidget("Setup name"));
+  layout->addWidget(name_input_);
+  layout->addWidget(createHeaderWidget("Keyboard type"));
+  layout->addWidget(keyboard_type_select_);
+  layout->addWidget(createHeaderWidget("Key map table"));
+  layout->addLayout(button_layout);
+  layout->addWidget(key_map_table_);
+  layout->addWidget(createHeaderWidget("Scan code"));
+  layout->addWidget(scan_code_display_);
+  layout->addWidget(buttons_);
   setLayout(layout);
 }
 
@@ -101,8 +119,9 @@ void EditKeyMapDialog::initWidgetValues_() {
   setKeyMapTable_(current_keyboard_type_, current_key_map_);
 }
 
-void EditKeyMapDialog::setKeyMapTable_(KeyboardType keyboard_type,
-                                       const QList<KeyMapEntry>& key_map) {
+QList<KeyMapEntry> EditKeyMapDialog::setKeyMapTable_(KeyboardType keyboard_type,
+                                                     const QList<KeyMapEntry>& key_map) {
+  QList<KeyMapEntry> updated_key_map;
   auto keyboard_type_name = getStringOfKeyboardType(keyboard_type);
   keyboard_type_select_->setCurrentIndex(keyboard_type_select_->findText(keyboard_type_name));
   for (auto& key_map_entry : key_map) {
@@ -110,13 +129,20 @@ void EditKeyMapDialog::setKeyMapTable_(KeyboardType keyboard_type,
     auto row = key_map_table_->rowCount() - 1;
 
     auto actual_key_name = getKeyNameOf(keyboard_type, key_map_entry.actual_key);
+    auto map_to_key_name = getKeyNameOf(keyboard_type, key_map_entry.map_to_key);
+    if (actual_key_name.isEmpty() || map_to_key_name.isEmpty()) {
+      // The key code is not supported in the specified keyboard type
+      // Ignore this entry
+      continue;
+    }
+    updated_key_map.append(key_map_entry);
     auto actual_key_select = qobject_cast<QComboBox*>(key_map_table_->cellWidget(row, 1));
     actual_key_select->setCurrentIndex(actual_key_select->findText(actual_key_name));
 
-    auto map_to_key_name = getKeyNameOf(keyboard_type, key_map_entry.map_to_key);
     auto map_to_key_select = qobject_cast<QComboBox*>(key_map_table_->cellWidget(row, 2));
     map_to_key_select->setCurrentIndex(map_to_key_select->findText(map_to_key_name));
   }
+  return updated_key_map;
 }
 
 void EditKeyMapDialog::addMapEntry_() {
@@ -173,6 +199,13 @@ void EditKeyMapDialog::loadCurrentScancodeMap_() {
   updateWindowState_();
 }
 
+void EditKeyMapDialog::updateKeyboardType_() {
+  auto key_map = getKeyMap();
+  key_map_table_->setRowCount(0);
+  setKeyMapTable_(getKeyboardType(), key_map);
+  updateWindowState_();
+}
+
 void EditKeyMapDialog::updateWindowState_() {
   // Delete button state
   bool any_checked = false;
@@ -190,9 +223,9 @@ void EditKeyMapDialog::updateWindowState_() {
   for (int row = 0; row < key_map_table_->rowCount(); ++ row) {
     KeyMapEntry entry;
     auto actual_key_select = qobject_cast<QComboBox*>(key_map_table_->cellWidget(row, 1));
-    entry.actual_key = getScanCodeOf(keyboard_type, actual_key_select->currentText());
+    entry.actual_key = actual_key_select->currentData().toUInt();
     auto map_to_key_select = qobject_cast<QComboBox*>(key_map_table_->cellWidget(row, 2));
-    entry.map_to_key = getScanCodeOf(keyboard_type, map_to_key_select->currentText());
+    entry.map_to_key = map_to_key_select->currentData().toUInt();
     key_map.append(entry);
   }
   auto ok_button = buttons_->button(QDialogButtonBox::Ok);
@@ -232,6 +265,8 @@ void EditKeyMapDialog::updateWindowState_() {
 void EditKeyMapDialog::createConnections_() {
   connect(name_input_, &QLineEdit::textChanged,
           this, &EditKeyMapDialog::updateWindowState_);
+  connect(keyboard_type_select_, qOverload<int>(&QComboBox::currentIndexChanged),
+          this, &EditKeyMapDialog::updateKeyboardType_);
   connect(key_map_table_, &QTableWidget::itemChanged,
           this, &updateWindowState_);
   connect(add_entry_button_, &QPushButton::clicked,
@@ -256,13 +291,12 @@ KeyboardType EditKeyMapDialog::getKeyboardType() const {
 
 QList<KeyMapEntry> EditKeyMapDialog::getKeyMap() const {
   QList<KeyMapEntry> key_map;
-  auto keyboard_type = getKeyboardType();
   for (int row = 0; row < key_map_table_->rowCount(); ++ row) {
     KeyMapEntry entry;
     auto actual_key_select = qobject_cast<QComboBox*>(key_map_table_->cellWidget(row, 1));
-    entry.actual_key = getScanCodeOf(keyboard_type, actual_key_select->currentText());
+    entry.actual_key = actual_key_select->currentData().toUInt();
     auto map_to_key_select = qobject_cast<QComboBox*>(key_map_table_->cellWidget(row, 2));
-    entry.map_to_key = getScanCodeOf(keyboard_type, map_to_key_select->currentText());
+    entry.map_to_key = map_to_key_select->currentData().toUInt();
     key_map.append(entry);
   }
   return key_map;

@@ -150,7 +150,8 @@ void MainWindow::applyScanCodeMap_() {
     }
   }
   QMessageBox::information(this, "Key map has been update",
-                           QString("Key ap has been updated to '%1'").arg(map_name));
+                           QString("Key ap has been updated to '%1'\n"
+                                   "Please restart the computer to reflect the change").arg(map_name));
   qApp->quit();
 }
 
